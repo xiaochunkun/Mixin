@@ -39,13 +39,11 @@ ext.buildNumber = project.hasProperty("buildNumber") ? buildNumber : '0'
 ext.ciSystem = project.hasProperty("ciSystem") ? ciSystem : 'unknown'
 ext.commit = project.hasProperty("commit") ? commit : 'unknown'
 ext.asmVersion = project.hasProperty("asmVersion") ? asmVersion : '6.2'
-ext.legacyForgeAsmVersion = project.hasProperty("legacyForgeAsmVersion") ? asmVersion : '5.0.3'
 
 // True to do jar signing task
 ext.doSignJar = project.hasProperty("keyStorePath")
 
 java {
-    modularity.inferModulePath = false
     toolchain.languageVersion = JavaLanguageVersion.of(ciSystem == 'unknown' ? 16 : 8)
 }
 
@@ -75,10 +73,6 @@ configurations {
     fernflowerImplementation    .extendsFrom implementation
     launchwrapperImplementation .extendsFrom implementation
     agentImplementation         .extendsFrom implementation
-    modlauncherImplementation   .extendsFrom implementation
-    modlauncher9Implementation  .extendsFrom modlauncherImplementation
-    modularityImplementation    .extendsFrom modlauncher9Implementation
-    modularityCompileOnly       .extendsFrom compileOnly
 }
 
 sourceSets {
@@ -100,7 +94,6 @@ sourceSets {
         compileClasspath += main.output
         ext.languageVersion = 8
         ext.compatibility = '1.6'
-        ext.modularityExcluded = true
     }
     agent {
         compileClasspath += main.output
@@ -111,40 +104,15 @@ sourceSets {
         compileClasspath += main.output
         ext.languageVersion = 8
         ext.compatibility = '1.8'
-        ext.modularityExcluded = true
     }
     example {
         compileClasspath += main.output
         compileClasspath += ap.output
-        ext.modularityExcluded = true
-    }
-    test {
-        ext.modularityExcluded = true
     }
     launchwrapper {
         compileClasspath += main.output
         ext.languageVersion = 8
         ext.compatibility = '1.8'
-    }
-    modlauncher {
-        compileClasspath += main.output
-        ext.languageVersion = 8
-        ext.compatibility = '1.8'
-    }
-    modlauncher4 {
-        compileClasspath += main.output
-        compileClasspath += modlauncher.output
-        ext.languageVersion = 8
-        ext.compatibility = '1.8'
-    }
-    modlauncher9 {
-        ext.languageVersion = 16
-        compileClasspath += main.output
-        compileClasspath += modlauncher.output
-    }
-    modularity {
-        ext.languageVersion = 16
-        ext.modularityExcluded = true // don't add ourselves
     }
 }
 
@@ -184,36 +152,11 @@ dependencies {
         exclude module: 'jopt-simple'
     }
     
-    modlauncherImplementation 'net.sf.jopt-simple:jopt-simple:5.0.4'
-    modlauncherCompileOnly 'org.apache.logging.log4j:log4j-core:2.0-beta9'
-    modlauncherImplementation ("cpw.mods:modlauncher:$legacyModlauncherVersion") {
-        exclude module: 'asm'
-        exclude module: 'asm-analysis'
-        exclude module: 'asm-commons'
-        exclude module: 'asm-tree'
-        exclude module: 'jopt-simple'
-    }
-    
-    modlauncher4Implementation ("cpw.mods:modlauncher:$legacyModlauncherVersion") {
-        exclude module: 'asm'
-        exclude module: 'asm-analysis'
-        exclude module: 'asm-commons'
-        exclude module: 'asm-tree'
-        exclude module: 'jopt-simple'
-    }
-    
-    modlauncher9Implementation ("cpw.mods:modlauncher:$modlauncherVersion") {
-        exclude module: 'jopt-simple'
-    }
-    modlauncher9Implementation 'cpw.mods:securejarhandler:2.1.24'
-    
     // asm bridge
     bridgeImplementation 'org.apache.logging.log4j:log4j-core:2.0-beta9'
     bridgeImplementation "org.ow2.asm:asm-commons:$legacyForgeAsmVersion"
     
     legacyImplementation "org.ow2.asm:asm-tree:$asmVersion"
-    
-    modularityCompileOnly 'org.apache.logging.log4j:log4j-core:2.11.2'
 }
 
 javadoc {
@@ -241,9 +184,6 @@ eclipse {
     classpath {
         containers 'org.eclipse.buildship.core.gradleclasspathcontainer'
         file.whenMerged {
-            // Can't include old modlauncher because it causes issues with modules
-            entries.removeAll { it.kind == 'lib' && it.path =~ ~/modlauncher-$legacyModlauncherVersion/ }
-            entries.removeAll { it.kind == 'src' && it.path =~ ~/modlauncher4/ }
             entries.removeAll { it.kind == 'lib' && it.path =~ ~/log4j.*beta9/ }
             
             // Mark everything else as a module
@@ -265,7 +205,7 @@ eclipse {
     }
     
     // Build service task outputs for test projects
-    autoBuildTasks compileModlauncher4Java, compileModlauncher9Java, compileLaunchwrapperJava
+    autoBuildTasks compileLaunchwrapperJava
 }
 
 // Filter, process, and include resources
@@ -309,8 +249,6 @@ tasks.withType(JavaCompile) {
     options.encoding = 'utf8'
 }
 
-def modularityInputs = objects.fileCollection()
-
 project.sourceSets.each { set -> {
     if (set.ext.has("languageVersion")) {
         project.tasks[set.compileJavaTaskName].javaCompiler = javaToolchains.compilerFor {
@@ -321,24 +259,7 @@ project.sourceSets.each { set -> {
         project.tasks[set.compileJavaTaskName].sourceCompatibility = set.ext.compatibility
         project.tasks[set.compileJavaTaskName].targetCompatibility = set.ext.compatibility
     }
-    def modularityExcluded = set.ext.has("modularityExcluded") && set.ext.modularityExcluded
-    if (!modularityExcluded) {
-        project.sourceSets.modularity {
-            compileClasspath += set.output
-        }
-        modularityInputs.from set.output
-    }
 }}
-
-compileModularityJava {
-    inputs.files(modularityInputs)
-    doFirst {
-        options.compilerArgs = [
-            '--module-path', classpath.asPath,
-            '--patch-module', "org.spongepowered.mixin=${modularityInputs.collect { it.absolutePath }.join(File.pathSeparator)}"
-        ]
-    }
-}
 
 if (JavaVersion.current().isJava8Compatible()) {
     tasks.withType(Javadoc) {
